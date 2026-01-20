@@ -1,0 +1,17 @@
+
+{
+  "name": "WorkDay Zen Timer",
+  "short_name": "ZenTimer",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#6366f1",
+  "description": "8-hour activity-triggered workday timer.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3563/3563395.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

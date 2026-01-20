@@ -1,0 +1,5 @@
+{
+  "name": "WorkDay Zen Timer",
+  "description": "An elegant 8-hour countdown timer that intelligently detects your first activity of the day to start the clock, featuring productivity insights powered by Gemini.",
+  "requestFramePermissions": []
+}
