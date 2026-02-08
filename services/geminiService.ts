@@ -3,7 +3,16 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { ProductivityTip } from "../types";
 
 export const getWorkdayTip = async (remainingHours: number): Promise<ProductivityTip> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = (process.env.API_KEY || process.env.GEMINI_API_KEY || "");
+  
+  if (!apiKey) {
+    return {
+      title: "Ready to Work?",
+      advice: "Start your timer and stay focused on your goals today."
+    };
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   
   try {
     const response = await ai.models.generateContent({

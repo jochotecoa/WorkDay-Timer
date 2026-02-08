@@ -13,6 +13,15 @@ const App: React.FC = () => {
 
   const [timer, setTimer] = useState<TimerState>(() => {
     const saved = localStorage.getItem('zen_timer_state');
+    const lastDate = localStorage.getItem('zen_last_active_day');
+    const today = new Date().toDateString();
+
+    // If it's a new day, reset to IDLE so it can start fresh
+    if (lastDate && lastDate !== today) {
+      localStorage.setItem('zen_last_active_day', today);
+      return { startTime: null, endTime: null, status: TimerStatus.IDLE };
+    }
+
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed.endTime && Date.now() > parsed.endTime) {
@@ -20,12 +29,15 @@ const App: React.FC = () => {
       }
       return parsed;
     }
+    
+    localStorage.setItem('zen_last_active_day', today);
     return { startTime: null, endTime: null, status: TimerStatus.IDLE };
   });
 
-  const [autoStartEnabled, setAutoStartEnabled] = useState(() => 
-    localStorage.getItem('zen_auto_start') === 'true'
-  );
+  const [autoStartEnabled, setAutoStartEnabled] = useState(() => {
+    const saved = localStorage.getItem('zen_auto_start');
+    return saved === null ? true : saved === 'true'; // Default to true for this requirement
+  });
   const [showGuide, setShowGuide] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(0);
@@ -33,6 +45,7 @@ const App: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [wakeLockActive, setWakeLockActive] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [focusTask, setFocusTask] = useState(() => localStorage.getItem('zen_focus_task') || '');
   
   // Duration inputs
   const [inputHours, setInputHours] = useState(Math.floor(totalDurationMs / (1000 * 60 * 60)));
@@ -56,6 +69,10 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('zen_total_duration', totalDurationMs.toString());
   }, [totalDurationMs]);
+
+  useEffect(() => {
+    localStorage.setItem('zen_focus_task', focusTask);
+  }, [focusTask]);
 
   // Notification Permission Check
   useEffect(() => {
@@ -137,6 +154,23 @@ const App: React.FC = () => {
     };
     fetchInitialTip();
   }, [totalDurationMs]);
+
+  // Day change check (Midnight Reset)
+  useEffect(() => {
+    const checkDayChange = () => {
+      const lastDate = localStorage.getItem('zen_last_active_day');
+      const today = new Date().toDateString();
+      
+      if (lastDate && lastDate !== today) {
+        localStorage.setItem('zen_last_active_day', today);
+        reset(); // Resets timer to IDLE
+        // If auto-start is on, it will automatically transition to LISTENING via the other effect
+      }
+    };
+
+    const interval = setInterval(checkDayChange, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
 
   const startTimer = useCallback(() => {
     const start = Date.now();
@@ -241,12 +275,44 @@ const App: React.FC = () => {
   const progress = timer.endTime ? Math.max(0, Math.min(100, (1 - timeLeft / totalDurationMs) * 100)) : 0;
   const time = formatTime(timeLeft);
 
+  const handleMinimize = () => {
+    (window as any).electron?.minimize();
+  };
+
+  const handleClose = () => {
+    (window as any).electron?.close();
+  };
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#0a0a0a] text-zinc-100 selection:bg-indigo-500/30">
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 pt-16 bg-[#0a0a0a] text-zinc-100 selection:bg-indigo-500/30">
       <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto" />
 
+      {/* Window Controls */}
+      <div className="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-6 z-[60] select-none cursor-default" style={{ WebkitAppRegion: 'drag' } as any}>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-zinc-800"></div>
+          <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">WorkDay Zen</span>
+        </div>
+        <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as any}>
+          <button 
+            onClick={handleMinimize}
+            className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-300 transition-colors"
+            title="Minimize"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 12H4" /></svg>
+          </button>
+          <button 
+            onClick={handleClose}
+            className="p-1.5 rounded-lg hover:bg-red-500/10 text-zinc-400 hover:text-red-400 transition-colors"
+            title="Close to Tray"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </div>
+
       {/* Persistent Settings Bar */}
-      <div className="fixed top-6 right-6 flex items-center gap-3 z-50">
+      <div className="fixed top-16 right-6 flex items-center gap-3 z-50">
         <button 
           onClick={() => setShowSettings(true)}
           className="p-2.5 rounded-full bg-zinc-900/50 hover:bg-zinc-800 border border-zinc-800 transition-all text-zinc-400 hover:text-white"
@@ -256,7 +322,7 @@ const App: React.FC = () => {
         </button>
         <button 
           onClick={requestNotificationPermission}
-          className={`p-2.5 rounded-full border transition-all ${notificationsEnabled ? 'bg-green-500/10 border-green-500/30 text-green-500' : 'bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:text-white'}`}
+          className={`p-2.5 rounded-full border transition-all ${notificationsEnabled ? 'bg-green-500/10 border-green-500/30 text-green-500' : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-white'}`}
           title={notificationsEnabled ? "Notifications Active" : "Enable Desktop Notifications"}
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -270,7 +336,7 @@ const App: React.FC = () => {
         </button>
         <button 
           onClick={() => setAutoStartEnabled(!autoStartEnabled)}
-          className={`px-4 py-2 rounded-xl border transition-all flex items-center gap-2 text-xs font-bold uppercase tracking-wider ${autoStartEnabled ? 'bg-indigo-600/10 border-indigo-500 text-indigo-400' : 'bg-zinc-900/50 border-zinc-800 text-zinc-500'}`}
+          className={`px-4 py-2 rounded-xl border transition-all flex items-center gap-2 text-xs font-bold uppercase tracking-wider ${autoStartEnabled ? 'bg-indigo-600/10 border-indigo-500 text-indigo-400' : 'bg-zinc-900/50 border-zinc-800 text-zinc-400'}`}
         >
           <div className={`w-2 h-2 rounded-full ${autoStartEnabled ? 'bg-indigo-400 animate-pulse' : 'bg-zinc-700'}`}></div>
           {autoStartEnabled ? 'Auto-Start: ON' : 'Auto-Start: OFF'}
@@ -283,7 +349,7 @@ const App: React.FC = () => {
           <div className="glass max-w-sm w-full rounded-3xl p-8 animate-in fade-in zoom-in duration-300">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold">Session Settings</h3>
-              <button onClick={() => setShowSettings(false)} className="text-zinc-500 hover:text-white">&times;</button>
+              <button onClick={() => setShowSettings(false)} className="text-zinc-400 hover:text-white">&times;</button>
             </div>
             <div className="space-y-6">
               <div>
@@ -295,8 +361,9 @@ const App: React.FC = () => {
                       min="0" 
                       max="24"
                       value={inputHours} 
+                      placeholder="00"
                       onChange={(e) => setInputHours(parseInt(e.target.value, 10) || 0)}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-4 text-center text-xl font-mono focus:border-indigo-500 outline-none transition-all"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-4 text-center text-xl font-mono focus:border-indigo-500 outline-none transition-all placeholder:text-zinc-700"
                     />
                     <span className="block text-center text-[10px] text-zinc-600 mt-1 uppercase font-bold">Hours</span>
                   </div>
@@ -307,8 +374,9 @@ const App: React.FC = () => {
                       min="0" 
                       max="59"
                       value={inputMinutes} 
+                      placeholder="00"
                       onChange={(e) => setInputMinutes(parseInt(e.target.value, 10) || 0)}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-4 text-center text-xl font-mono focus:border-indigo-500 outline-none transition-all"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-4 text-center text-xl font-mono focus:border-indigo-500 outline-none transition-all placeholder:text-zinc-700"
                     />
                     <span className="block text-center text-[10px] text-zinc-600 mt-1 uppercase font-bold">Minutes</span>
                   </div>
@@ -339,7 +407,7 @@ const App: React.FC = () => {
           <div className="glass max-w-lg w-full rounded-3xl p-8 animate-in fade-in zoom-in duration-300">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold">Native System Integration</h3>
-              <button onClick={() => setShowGuide(false)} className="text-zinc-500 hover:text-white">&times;</button>
+              <button onClick={() => setShowGuide(false)} className="text-zinc-400 hover:text-white">&times;</button>
             </div>
             <div className="space-y-6 text-sm text-zinc-400 leading-relaxed">
               <section>
@@ -380,10 +448,10 @@ const App: React.FC = () => {
         <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-purple-600/10 blur-[100px] rounded-full pointer-events-none"></div>
 
         <header className="text-center mb-12">
-          <h1 className="text-4xl font-extrabold tracking-tight mb-2 bg-gradient-to-r from-white to-zinc-500 bg-clip-text text-transparent">
+          <h1 className="text-4xl font-extrabold tracking-tight mb-2 bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
             WorkDay Zen
           </h1>
-          <p className="text-zinc-500 text-sm font-medium uppercase tracking-widest">
+          <p className="text-zinc-400 text-sm font-medium uppercase tracking-widest">
             {timer.status === TimerStatus.RUNNING ? 'Focus Mode Active' : 'Waiting for Activity'}
           </p>
         </header>
@@ -396,8 +464,21 @@ const App: React.FC = () => {
             />
           </div>
 
+          {(timer.status === TimerStatus.IDLE || timer.status === TimerStatus.LISTENING) && (
+            <div className="mb-8 max-w-md mx-auto animate-in fade-in slide-in-from-top-4 duration-500">
+              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em] mb-3 text-left">What are you focusing on?</label>
+              <input 
+                type="text"
+                value={focusTask}
+                onChange={(e) => setFocusTask(e.target.value)}
+                placeholder="e.g. Refactoring the API, Writing documentation..."
+                className="w-full bg-zinc-950/50 border border-zinc-800 rounded-2xl py-4 px-6 text-zinc-200 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all placeholder:text-zinc-700 shadow-inner"
+              />
+            </div>
+          )}
+
           {timer.status === TimerStatus.IDLE && (
-            <div className="py-12 animate-in fade-in zoom-in duration-500">
+            <div className="py-6 animate-in fade-in zoom-in duration-500">
               <h2 className="text-2xl font-semibold mb-2">Ready to start?</h2>
               <p className="text-indigo-400 font-mono mb-8 uppercase tracking-widest text-xs">Session: {formatTime(totalDurationMs).h}h {formatTime(totalDurationMs).m}m</p>
               <button 
@@ -406,14 +487,14 @@ const App: React.FC = () => {
               >
                 Listen for Activity
               </button>
-              <p className="mt-6 text-zinc-500 text-sm max-w-sm mx-auto leading-relaxed">
+              <p className="mt-6 text-zinc-400 text-sm max-w-sm mx-auto leading-relaxed">
                 The countdown begins the moment you interact with your computer.
               </p>
             </div>
           )}
 
           {timer.status === TimerStatus.LISTENING && (
-            <div className="py-12 flex flex-col items-center">
+            <div className="py-6 flex flex-col items-center">
               <div className="relative mb-8">
                 <div className="w-24 h-24 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -421,8 +502,8 @@ const App: React.FC = () => {
                 </div>
               </div>
               <h2 className="text-2xl font-semibold mb-2 tracking-tight italic">Waiting...</h2>
-              <p className="text-zinc-500">Clock starts on your first move.</p>
-              <button onClick={reset} className="mt-8 text-zinc-500 hover:text-white transition-colors text-sm underline underline-offset-4">
+              <p className="text-zinc-400">Clock starts on your first move.</p>
+              <button onClick={reset} className="mt-8 text-zinc-400 hover:text-white transition-colors text-sm underline underline-offset-4">
                 Cancel
               </button>
             </div>
@@ -430,6 +511,12 @@ const App: React.FC = () => {
 
           {timer.status === TimerStatus.RUNNING && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {focusTask && (
+                <div className="mb-8">
+                  <span className="text-[10px] font-bold text-indigo-400/70 uppercase tracking-[0.2em] block mb-2">Current Focus</span>
+                  <h3 className="text-xl font-medium text-zinc-200">{focusTask}</h3>
+                </div>
+              )}
               <div className="flex justify-center items-baseline gap-2 font-mono text-7xl md:text-8xl lg:text-9xl font-extrabold tracking-tighter text-white">
                 <span className="tabular-nums">{time.h}</span>
                 <span className="text-zinc-800 animate-pulse">:</span>
@@ -441,7 +528,7 @@ const App: React.FC = () => {
               <div className="mt-12 flex justify-center gap-4">
                 <button 
                   onClick={() => setIsMuted(!isMuted)}
-                  className={`p-3 rounded-xl border transition-all ${isMuted ? 'bg-zinc-800 border-zinc-700 text-zinc-500' : 'bg-zinc-800/50 border-zinc-700 text-indigo-400'}`}
+                  className={`p-3 rounded-xl border transition-all ${isMuted ? 'bg-zinc-800 border-zinc-700 text-zinc-400' : 'bg-zinc-800/50 border-zinc-700 text-indigo-400'}`}
                 >
                   {isMuted ? (
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
@@ -480,7 +567,7 @@ const App: React.FC = () => {
           )}
         </main>
 
-        {tip && (timer.status === TimerStatus.RUNNING || timer.status === TimerStatus.IDLE) && (
+        {tip && (timer.status === TimerStatus.RUNNING || timer.status === TimerStatus.IDLE || timer.status === TimerStatus.LISTENING) && (
           <div className="mt-8 p-6 glass rounded-2xl flex items-start gap-4 animate-in fade-in slide-in-from-top-4 delay-500 shadow-lg">
             <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
